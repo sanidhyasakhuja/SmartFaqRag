@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Smart FAQ Chatbot</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 0;
+            padding: 40px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .chat-box { 
+            max-width: 600px; 
+            margin: auto; 
+            background: white;
+            border: 1px solid #ccc; 
+            padding: 20px; 
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        h2 {
+            color: #667eea;
+            margin-top: 0;
+        }
+        #messages {
+            max-height: 400px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #f9f9f9;
+            border-radius: 8px;
+        }
+        .msg { 
+            margin-bottom: 15px; 
+            padding: 10px;
+            border-radius: 8px;
+            line-height: 1.5;
+        }
+        .user { 
+            background: #e3f2fd;
+            color: #1976d2; 
+            text-align: right;
+        }
+        .bot { 
+            background: #f1f8e9;
+            color: #558b2f; 
+        }
+        .input-container {
+            display: flex;
+            gap: 10px;
+        }
+        input { 
+            flex: 1;
+            padding: 12px; 
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        button {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .loading {
+            color: #999;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+<div class="chat-box">
+    <h2>🤖 Smart FAQ Chatbot</h2>
+    <div id="messages"></div>
+    <div class="input-container">
+        <input
+                id="question"
+                placeholder="Ask a question..."
+                onkeypress="if(event.key==='Enter') send()"
+        />
+        <button onclick="send()" id="sendBtn">Send</button>
+    </div>
+</div>
+
+<script>
+    async function send() {
+        const input = document.getElementById('question');
+        const q = input.value.trim();
+        
+        if (!q) return;
+        
+        const messages = document.getElementById('messages');
+        const sendBtn = document.getElementById('sendBtn');
+        
+        // Add user message
+        messages.innerHTML += `<div class="msg user"><b>You:</b> ${q}</div>`;
+        input.value = '';
+        
+        // Show loading
+        messages.innerHTML += `<div class="msg bot loading" id="loading"><b>Bot:</b> Thinking...</div>`;
+        messages.scrollTop = messages.scrollHeight;
+        sendBtn.disabled = true;
+        
+        try {
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({question: q})
+            });
+            
+            const data = await res.json();
+            
+            // Remove loading message
+            document.getElementById('loading').remove();
+            
+            // Add bot response
+            messages.innerHTML += `<div class="msg bot"><b>Bot:</b> ${data.answer}</div>`;
+            messages.scrollTop = messages.scrollHeight;
+            
+        } catch (error) {
+            document.getElementById('loading').remove();
+            messages.innerHTML += `<div class="msg bot"><b>Bot:</b> Sorry, something went wrong. Please try again.</div>`;
+        } finally {
+            sendBtn.disabled = false;
+        }
+    }
+</script>
+</body>
+</html>
