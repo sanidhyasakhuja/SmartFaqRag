@@ -1,145 +1,626 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Smart FAQ Chatbot</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart FAQ RAG Assistant</title>
     <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
-            font-family: Arial, sans-serif; 
-            margin: 0;
-            padding: 40px; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
+            padding: 20px;
         }
-        .chat-box { 
-            max-width: 600px; 
-            margin: auto; 
+        .container { 
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .card {
             background: white;
-            border: 1px solid #ccc; 
-            padding: 20px; 
             border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 20px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
         }
-        h2 {
+        h1 { 
             color: #667eea;
-            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 2em;
         }
-        #messages {
-            max-height: 400px;
-            overflow-y: auto;
+        h2 { 
+            color: #333;
             margin-bottom: 20px;
+            font-size: 1.3em;
+        }
+        h3 {
+            color: #667eea;
+            margin: 20px 0 10px 0;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #f8f9ff;
+        }
+        .upload-area:hover {
+            background: #eef1ff;
+            border-color: #764ba2;
+        }
+        .upload-area.dragover {
+            background: #e0e7ff;
+            border-color: #764ba2;
+        }
+        input[type="file"] { display: none; }
+        .file-info {
+            margin: 15px 0;
             padding: 10px;
-            background: #f9f9f9;
-            border-radius: 8px;
-        }
-        .msg { 
-            margin-bottom: 15px; 
-            padding: 10px;
-            border-radius: 8px;
-            line-height: 1.5;
-        }
-        .user { 
-            background: #e3f2fd;
-            color: #1976d2; 
-            text-align: right;
-        }
-        .bot { 
-            background: #f1f8e9;
-            color: #558b2f; 
-        }
-        .input-container {
-            display: flex;
-            gap: 10px;
-        }
-        input { 
-            flex: 1;
-            padding: 12px; 
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            font-size: 14px;
-        }
-        input:focus {
-            outline: none;
-            border-color: #667eea;
+            background: #f0f0f0;
+            border-radius: 5px;
+            font-size: 0.9em;
         }
         button {
-            padding: 12px 24px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
-            border-radius: 8px;
+            padding: 12px 30px;
+            border-radius: 6px;
             cursor: pointer;
-            font-weight: bold;
+            font-size: 1em;
+            font-weight: 600;
             transition: transform 0.2s;
+            margin: 5px;
         }
         button:hover {
             transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
         button:disabled {
-            opacity: 0.6;
+            opacity: 0.5;
             cursor: not-allowed;
         }
+        button.danger {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+        }
+        textarea {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 1em;
+            resize: vertical;
+            min-height: 150px;
+        }
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .chat-area {
+            margin-top: 20px;
+            max-height: 500px;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .message {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            animation: fadeIn 0.3s;
+            word-wrap: break-word;
+        }
+        .user-message {
+            background: #667eea;
+            color: white;
+            margin-left: 20%;
+            text-align: right;
+        }
+        .bot-message {
+            background: #f0f0f0;
+            color: #333;
+            margin-right: 20%;
+        }
+        .stats {
+            background: #f8f9ff;
+            padding: 20px;
+            border-radius: 6px;
+            margin-top: 20px;
+        }
+        .stats ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        .stats li {
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .stats li:last-child {
+            border-bottom: none;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0;
+            text-align: center;
+            font-weight: 600;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .tab-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .tab-btn {
+            flex: 1;
+            background: #f0f0f0;
+            color: #333;
+        }
+        .tab-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        hr {
+            margin: 30px 0;
+            border: none;
+            border-top: 1px solid #ddd;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 600;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
         .loading {
-            color: #999;
-            font-style: italic;
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
-<div class="chat-box">
-    <h2>🤖 Smart FAQ Chatbot</h2>
-    <div id="messages"></div>
-    <div class="input-container">
-        <input
-                id="question"
-                placeholder="Ask a question..."
-                onkeypress="if(event.key==='Enter') send()"
-        />
-        <button onclick="send()" id="sendBtn">Send</button>
+<div class="container">
+    <div class="card">
+        <h1>📚 Smart FAQ RAG Assistant</h1>
+        <p class="subtitle">Upload documents and ask questions powered by AI!</p>
+
+        <div class="tab-buttons">
+            <button class="tab-btn active" onclick="showTab('upload')">📁 Upload</button>
+            <button class="tab-btn" onclick="showTab('chat')">💬 Chat</button>
+            <button class="tab-btn" onclick="showTab('stats')">📊 Stats</button>
+        </div>
+
+        <!-- Upload Tab -->
+        <div id="uploadTab">
+            <h2>Upload Documents</h2>
+
+            <div class="upload-area" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                <p style="font-size: 3em; margin-bottom: 10px;">📄</p>
+                <p><strong>Click to select</strong> or drag and drop files</p>
+                <p style="font-size: 0.9em; color: #666; margin-top: 10px;">
+                    Supports: TXT, PDF, MD (Max 10MB per file)
+                </p>
+            </div>
+
+            <input type="file" id="fileInput" multiple accept=".txt,.pdf,.md" onchange="handleFileSelect(event)">
+            <div id="fileList"></div>
+            <button onclick="uploadFiles()" id="uploadBtn" style="display:none;">📤 Upload Files</button>
+
+            <hr>
+
+            <h2>Or Upload Text Directly</h2>
+            <div class="input-group">
+                <label for="textTitle">Document Title:</label>
+                <input type="text" id="textTitle" placeholder="My Document" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 6px;">
+            </div>
+            <div class="input-group">
+                <label for="textInput">Content:</label>
+                <textarea id="textInput" placeholder="Paste your text content here..."></textarea>
+            </div>
+            <button onclick="uploadText()">📝 Upload Text</button>
+
+            <hr>
+
+            <h2>Or Upload FAQs (JSON Format)</h2>
+            <div class="input-group">
+                <label for="faqInput">FAQs (one per line):</label>
+                <textarea id="faqInput" placeholder='Q: What is AI? A: Artificial Intelligence is...&#10;Q: What is ML? A: Machine Learning is...'></textarea>
+            </div>
+            <button onclick="uploadFaqs()">❓ Upload FAQs</button>
+
+            <div id="uploadStatus"></div>
+        </div>
+
+        <!-- Chat Tab -->
+        <div id="chatTab" style="display:none;">
+            <h2>Ask Questions</h2>
+            <p style="color: #666; margin-bottom: 15px;">Ask questions about the documents you've uploaded</p>
+
+            <div class="input-group">
+                <textarea id="questionInput" placeholder="Type your question here... (Press Shift+Enter for new line, Enter to send)"></textarea>
+            </div>
+
+            <div class="button-group">
+                <button onclick="askQuestion()">🚀 Ask Question</button>
+                <button onclick="clearChat()" style="background: #6c757d;">🗑️ Clear Chat</button>
+            </div>
+
+            <div class="chat-area" id="chatArea">
+                <div style="text-align: center; color: #999; padding: 40px;">
+                    No messages yet. Start by asking a question!
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Tab -->
+        <div id="statsTab" style="display:none;">
+            <h2>Document Statistics</h2>
+            <p style="color: #666; margin-bottom: 15px;">View and manage your uploaded documents</p>
+
+            <div class="button-group">
+                <button onclick="loadStats()">🔄 Refresh Stats</button>
+                <button onclick="clearDocuments()" class="danger">🗑️ Clear All Documents</button>
+            </div>
+
+            <div class="stats" id="statsArea">
+                <p style="text-align: center; color: #999;">Click "Refresh Stats" to load statistics</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="card" style="text-align: center; padding: 20px;">
+        <p style="color: #666;">
+            <strong>System Status:</strong>
+            <span id="systemStatus" style="color: #28a745;">● Connected</span>
+        </p>
+        <p style="color: #999; font-size: 0.9em; margin-top: 10px;">
+            Smart FAQ RAG Assistant v1.0 | Powered by Spring AI & OpenRouter
+        </p>
     </div>
 </div>
 
 <script>
-    async function send() {
-        const input = document.getElementById('question');
-        const q = input.value.trim();
-        
-        if (!q) return;
-        
-        const messages = document.getElementById('messages');
-        const sendBtn = document.getElementById('sendBtn');
-        
-        // Add user message
-        messages.innerHTML += `<div class="msg user"><b>You:</b> ${q}</div>`;
-        input.value = '';
-        
-        // Show loading
-        messages.innerHTML += `<div class="msg bot loading" id="loading"><b>Bot:</b> Thinking...</div>`;
-        messages.scrollTop = messages.scrollHeight;
-        sendBtn.disabled = true;
-        
+    const API_BASE = 'http://localhost:9090/api';
+    let selectedFiles = [];
+
+    // Check system health on load
+    window.addEventListener('load', () => {
+        checkHealth();
+        setInterval(checkHealth, 30000); // Check every 30 seconds
+    });
+
+    async function checkHealth() {
         try {
-            const res = await fetch('/api/chat', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({question: q})
-            });
-            
-            const data = await res.json();
-            
-            // Remove loading message
-            document.getElementById('loading').remove();
-            
-            // Add bot response
-            messages.innerHTML += `<div class="msg bot"><b>Bot:</b> ${data.answer}</div>`;
-            messages.scrollTop = messages.scrollHeight;
-            
+            const response = await fetch(`${API_BASE}/chat/health`);
+            if (response.ok) {
+                document.getElementById('systemStatus').innerHTML = '● Connected';
+                document.getElementById('systemStatus').style.color = '#28a745';
+            } else {
+                throw new Error('Health check failed');
+            }
         } catch (error) {
-            document.getElementById('loading').remove();
-            messages.innerHTML += `<div class="msg bot"><b>Bot:</b> Sorry, something went wrong. Please try again.</div>`;
-        } finally {
-            sendBtn.disabled = false;
+            document.getElementById('systemStatus').innerHTML = '● Disconnected';
+            document.getElementById('systemStatus').style.color = '#dc3545';
         }
     }
+
+    function showTab(tab) {
+        // Remove active class from all buttons
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        // Add active class to clicked button
+        event.target.classList.add('active');
+
+        // Hide all tabs
+        document.getElementById('uploadTab').style.display = 'none';
+        document.getElementById('chatTab').style.display = 'none';
+        document.getElementById('statsTab').style.display = 'none';
+
+        // Show selected tab
+        if (tab === 'upload') {
+            document.getElementById('uploadTab').style.display = 'block';
+        } else if (tab === 'chat') {
+            document.getElementById('chatTab').style.display = 'block';
+        } else if (tab === 'stats') {
+            document.getElementById('statsTab').style.display = 'block';
+            loadStats(); // Auto-load stats when opening tab
+        }
+    }
+
+    // Drag and drop functionality
+    const dropZone = document.getElementById('dropZone');
+
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('dragover');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        handleFileSelect({target: {files: e.dataTransfer.files}});
+    });
+
+    function handleFileSelect(event) {
+        selectedFiles = Array.from(event.target.files);
+        const fileList = document.getElementById('fileList');
+
+        if (selectedFiles.length === 0) {
+            fileList.innerHTML = '';
+            document.getElementById('uploadBtn').style.display = 'none';
+            return;
+        }
+
+        fileList.innerHTML = '<h3>Selected Files:</h3>' + selectedFiles.map(f =>
+            `<div class="file-info">📄 ${f.name} (${(f.size/1024).toFixed(2)} KB)</div>`
+        ).join('');
+
+        document.getElementById('uploadBtn').style.display = 'inline-block';
+    }
+
+    async function uploadFiles() {
+        if (selectedFiles.length === 0) {
+            showStatus('❌ Please select files first', 'error', 'uploadStatus');
+            return;
+        }
+
+        const formData = new FormData();
+        selectedFiles.forEach(file => formData.append('files', file));
+
+        showStatus('⏳ Uploading files...', 'info', 'uploadStatus');
+
+        try {
+            const response = await fetch(`${API_BASE}/documents/upload/batch`, {
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+
+            if (response.ok) {
+                showStatus(`✅ Success! ${data.filesCount} files uploaded, ${data.totalChunksStored} chunks stored.`, 'success', 'uploadStatus');
+                selectedFiles = [];
+                document.getElementById('fileList').innerHTML = '';
+                document.getElementById('fileInput').value = '';
+                document.getElementById('uploadBtn').style.display = 'none';
+            } else {
+                showStatus(`❌ Error: ${data.error}`, 'error', 'uploadStatus');
+            }
+        } catch (error) {
+            showStatus(`❌ Error: ${error.message}`, 'error', 'uploadStatus');
+        }
+    }
+
+    async function uploadText() {
+        const text = document.getElementById('textInput').value;
+        const title = document.getElementById('textTitle').value || 'User Text';
+
+        if (!text.trim()) {
+            showStatus('❌ Please enter some text', 'error', 'uploadStatus');
+            return;
+        }
+
+        showStatus('⏳ Processing text...', 'info', 'uploadStatus');
+
+        try {
+            const response = await fetch(`${API_BASE}/documents/upload/text`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({text, title})
+            });
+            const data = await response.json();
+
+            if (response.ok) {
+                showStatus(`✅ Success! ${data.chunksStored} chunks stored from "${title}".`, 'success', 'uploadStatus');
+                document.getElementById('textInput').value = '';
+                document.getElementById('textTitle').value = '';
+            } else {
+                showStatus(`❌ Error: ${data.error}`, 'error', 'uploadStatus');
+            }
+        } catch (error) {
+            showStatus(`❌ Error: ${error.message}`, 'error', 'uploadStatus');
+        }
+    }
+
+    async function uploadFaqs() {
+        const faqText = document.getElementById('faqInput').value;
+
+        if (!faqText.trim()) {
+            showStatus('❌ Please enter FAQs', 'error', 'uploadStatus');
+            return;
+        }
+
+        // Split by newlines and filter empty lines
+        const faqs = faqText.split('\n').filter(line => line.trim() !== '');
+
+        if (faqs.length === 0) {
+            showStatus('❌ No valid FAQs found', 'error', 'uploadStatus');
+            return;
+        }
+
+        showStatus('⏳ Processing FAQs...', 'info', 'uploadStatus');
+
+        try {
+            const response = await fetch(`${API_BASE}/documents/upload/faqs`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({faqs})
+            });
+            const data = await response.json();
+
+            if (response.ok) {
+                showStatus(`✅ Success! ${data.faqsStored} FAQs stored.`, 'success', 'uploadStatus');
+                document.getElementById('faqInput').value = '';
+            } else {
+                showStatus(`❌ Error: ${data.error}`, 'error', 'uploadStatus');
+            }
+        } catch (error) {
+            showStatus(`❌ Error: ${error.message}`, 'error', 'uploadStatus');
+        }
+    }
+
+    async function askQuestion() {
+        const question = document.getElementById('questionInput').value;
+
+        if (!question.trim()) {
+            return;
+        }
+
+        const chatArea = document.getElementById('chatArea');
+
+        // Clear placeholder if exists
+        if (chatArea.querySelector('div[style*="text-align: center"]')) {
+            chatArea.innerHTML = '';
+        }
+
+        // Add user message
+        chatArea.innerHTML += `<div class="message user-message">${escapeHtml(question)}</div>`;
+
+        // Add loading indicator
+        const loadingId = 'loading-' + Date.now();
+        chatArea.innerHTML += `<div class="message bot-message" id="${loadingId}">
+            <span class="loading"></span> Thinking...
+        </div>`;
+        chatArea.scrollTop = chatArea.scrollHeight;
+
+        document.getElementById('questionInput').value = '';
+
+        try {
+            const response = await fetch(`${API_BASE}/chat`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({question})
+            });
+            const data = await response.json();
+
+            // Remove loading indicator
+            document.getElementById(loadingId).remove();
+
+            const answer = data.answer || data.error || 'No response received';
+            chatArea.innerHTML += `<div class="message bot-message">${escapeHtml(answer)}</div>`;
+            chatArea.scrollTop = chatArea.scrollHeight;
+
+        } catch (error) {
+            document.getElementById(loadingId).remove();
+            chatArea.innerHTML += `<div class="message bot-message">❌ Error: ${escapeHtml(error.message)}</div>`;
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+    }
+
+    function clearChat() {
+        if (confirm('Are you sure you want to clear the chat history?')) {
+            document.getElementById('chatArea').innerHTML = `
+                <div style="text-align: center; color: #999; padding: 40px;">
+                    No messages yet. Start by asking a question!
+                </div>
+            `;
+        }
+    }
+
+    async function loadStats() {
+        showStatus('⏳ Loading statistics...', 'info', 'statsArea');
+
+        try {
+            const response = await fetch(`${API_BASE}/documents/stats`);
+            const data = await response.json();
+
+            let breakdown = '';
+            if (Object.keys(data.documentBreakdown).length > 0) {
+                breakdown = '<h3>📊 Documents Breakdown:</h3><ul>';
+                for (const [key, val] of Object.entries(data.documentBreakdown)) {
+                    breakdown += `<li><strong>${escapeHtml(key)}:</strong> ${val} chunks</li>`;
+                }
+                breakdown += '</ul>';
+            } else {
+                breakdown = '<p style="text-align: center; color: #999; padding: 20px;">No documents uploaded yet</p>';
+            }
+
+            document.getElementById('statsArea').innerHTML = `
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <h3 style="font-size: 2em; color: #667eea;">${data.totalChunks}</h3>
+                    <p style="color: #666;">Total Chunks Stored</p>
+                </div>
+                ${breakdown}
+                <p style="margin-top: 20px; color: #999; font-size: 0.9em; text-align: center;">
+                    Last updated: ${new Date(data.timestamp).toLocaleString()}
+                </p>
+            `;
+        } catch (error) {
+            showStatus(`❌ Error loading stats: ${error.message}`, 'error', 'statsArea');
+        }
+    }
+
+    async function clearDocuments() {
+        if (!confirm('⚠️ Are you sure you want to clear ALL documents?\n\nThis action cannot be undone!')) {
+            return;
+        }
+
+        showStatus('⏳ Clearing documents...', 'info', 'statsArea');
+
+        try {
+            const response = await fetch(`${API_BASE}/documents/clear`, {
+                method: 'DELETE'
+            });
+            const data = await response.json();
+
+            if (response.ok) {
+                showStatus('✅ All documents cleared successfully!', 'success', 'statsArea');
+                setTimeout(loadStats, 1000);
+            } else {
+                showStatus(`❌ Error: ${data.error}`, 'error', 'statsArea');
+            }
+        } catch (error) {
+            showStatus(`❌ Error: ${error.message}`, 'error', 'statsArea');
+        }
+    }
+
+    function showStatus(message, type, elementId) {
+        const element = document.getElementById(elementId);
+        element.innerHTML = `<div class="status ${type}">${message}</div>`;
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // Allow Enter key to submit question (Shift+Enter for new line)
+    document.getElementById('questionInput').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            askQuestion();
+        }
+    });
 </script>
 </body>
 </html>

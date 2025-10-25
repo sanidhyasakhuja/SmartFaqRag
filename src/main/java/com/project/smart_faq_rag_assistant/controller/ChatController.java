@@ -40,4 +40,13 @@ public class ChatController {
     }
 
 
+    @GetMapping("/memory")
+    public ResponseEntity<Map<String, Object>> checkMemory() {
+        Runtime runtime = Runtime.getRuntime();
+        return ResponseEntity.ok(Map.of(
+                "maxMemoryMB", runtime.maxMemory() / (1024 * 1024),
+                "totalMemoryMB", runtime.totalMemory() / (1024 * 1024)
+        ));
+    }
+
 }
