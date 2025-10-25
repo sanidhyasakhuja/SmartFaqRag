@@ -50,6 +50,18 @@
 		</dependency>
 
 		<dependency>
+			<groupId>org.apache.pdfbox</groupId>
+			<artifactId>pdfbox</artifactId>
+			<version>2.0.29</version>
+		</dependency>
+
+		<dependency>
+			<groupId>commons-io</groupId>
+			<artifactId>commons-io</artifactId>
+			<version>2.11.0</version>
+		</dependency>
+
+		<dependency>
 			<groupId>org.projectlombok</groupId>
 			<artifactId>lombok</artifactId>
 			<optional>true</optional>
@@ -74,6 +86,11 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+				<configuration>
+					<jvmArguments>
+						-Xms512m -Xmx2048m -XX:+UseG1GC -XX:MaxMetaspaceSize=512m
+					</jvmArguments>
+				</configuration>
 			</plugin>
 		</plugins>
 	</build>
