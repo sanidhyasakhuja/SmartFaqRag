@@ -225,12 +225,47 @@ public class DocumentUploadController {
     public ResponseEntity<Map<String, String>> clearDocuments() {
         try {
             documentService.clearAllDocuments();
-            System.gc(); // Suggest garbage collection after clearing
             return ResponseEntity.ok(Map.of("message", "All documents cleared successfully"));
         } catch (Exception e) {
             log.error("Error clearing documents", e);
             return ResponseEntity.internalServerError()
                     .body(Map.of("error", "Failed to clear documents: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Delete documents by source name
+     */
+    @DeleteMapping("/source/{sourceName}")
+    public ResponseEntity<Map<String, String>> deleteBySource(@PathVariable String sourceName) {
+        try {
+            boolean deleted = documentService.deleteDocumentsBySource(sourceName);
+            if (deleted) {
+                return ResponseEntity.ok(Map.of(
+                        "message", "Documents from source '" + sourceName + "' deleted successfully"
+                ));
+            } else {
+                return ResponseEntity.notFound().build();
+            }
+        } catch (Exception e) {
+            log.error("Error deleting documents from source: {}", sourceName, e);
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", "Failed to delete documents: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * List all document sources
+     */
+    @GetMapping("/sources")
+    public ResponseEntity<Map<String, Object>> listSources() {
+        try {
+            List<String> sources = documentService.listSources();
+            return ResponseEntity.ok(Map.of("sources", sources, "count", sources.size()));
+        } catch (Exception e) {
+            log.error("Error listing sources", e);
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", "Failed to list sources: " + e.getMessage()));
         }
     }
 }

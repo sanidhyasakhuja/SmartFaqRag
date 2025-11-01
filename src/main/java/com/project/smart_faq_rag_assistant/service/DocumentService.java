@@ -13,28 +13,37 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 
 @Service
 public class DocumentService {
 
     private static final Logger log = LoggerFactory.getLogger(DocumentService.class);
-    private static final int CHUNK_SIZE = 500; // Reduced from 1000 to 500
-    private static final int CHUNK_OVERLAP = 100; // Reduced from 200 to 100
-    private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-    private static final int MAX_TEXT_LENGTH = 5 * 1024 * 1024; // 5MB of text
-    private static final int BATCH_SIZE = 10; // Reduced from 50 to 10 for embeddings
 
+    // Configuration constants
+    private static final int CHUNK_SIZE = 500;
+    private static final int CHUNK_OVERLAP = 100;
+    private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+    private static final int MAX_TEXT_LENGTH = 5 * 1024 * 1024; // 5MB
+    private static final int BATCH_SIZE = 10;
+    private static final int MAX_PDF_PAGES = 200;
+    private static final long BATCH_DELAY_MS = 100;
+
+    // Thread-safe collections
     private final VectorStore vectorStore;
     private final AtomicInteger documentCounter = new AtomicInteger(0);
-    private final Map<String, Integer> documentStats = Collections.synchronizedMap(new HashMap<>());
+    private final Map<String, Integer> documentStats = new ConcurrentHashMap<>();
+    private final Map<String, List<String>> documentIdsBySource = new ConcurrentHashMap<>();
+    private final ReentrantLock processingLock = new ReentrantLock();
 
     public DocumentService(VectorStore vectorStore) {
         this.vectorStore = vectorStore;
     }
 
     /**
-     * Process and store a file (supports .txt, .pdf, .md)
+     * Process and store a file with validation and error handling
      */
     public int processAndStoreFile(MultipartFile file) throws IOException {
         String filename = file.getOriginalFilename();
@@ -42,35 +51,24 @@ public class DocumentService {
 
         log.info("Processing file: {} (size: {} bytes)", filename, fileSize);
 
-        if (fileSize > MAX_FILE_SIZE) {
-            throw new IOException("File too large. Maximum size is " + (MAX_FILE_SIZE / 1024 / 1024) + "MB");
-        }
-
-        if (fileSize == 0) {
-            throw new IOException("File is empty");
-        }
+        // Validation
+        validateFile(file, filename, fileSize);
 
         String content;
         try {
-            if (filename != null && filename.toLowerCase().endsWith(".pdf")) {
-                content = extractTextFromPdf(file.getInputStream());
-            } else {
-                content = new String(file.getBytes(), StandardCharsets.UTF_8);
-            }
+            content = extractContent(file, filename);
         } catch (OutOfMemoryError e) {
             log.error("Out of memory while reading file: {}", filename);
-            throw new IOException("File too large to process. Try a smaller file.");
+            throw new IOException("File too large to process. Please try a smaller file.");
         }
 
-        if (content.length() > MAX_TEXT_LENGTH) {
-            throw new IOException("Text content too large. Maximum length is " + (MAX_TEXT_LENGTH / 1024 / 1024) + "MB");
-        }
+        validateContentSize(content);
 
         return processAndStoreText(content, filename);
     }
 
     /**
-     * Process and store raw text content with aggressive memory management
+     * Process and store text with batch processing and memory management
      */
     public int processAndStoreText(String text, String source) {
         if (text == null || text.trim().isEmpty()) {
@@ -78,129 +76,163 @@ public class DocumentService {
             return 0;
         }
 
-        if (text.length() > MAX_TEXT_LENGTH) {
-            throw new IllegalArgumentException("Text too large. Maximum length is " + (MAX_TEXT_LENGTH / 1024 / 1024) + "MB");
-        }
+        validateContentSize(text);
 
         log.info("Processing text from '{}' (length: {} chars)", source, text.length());
 
-        List<String> chunks = chunkText(text);
-        log.info("Split '{}' into {} chunks", source, chunks.size());
+        processingLock.lock();
+        try {
+            List<String> chunks = chunkText(text);
+            log.info("Split '{}' into {} chunks", source, chunks.size());
 
-        if (chunks.isEmpty()) {
-            log.warn("No chunks created from '{}'", source);
-            return 0;
-        }
-
-        int totalStored = 0;
-
-        // Process chunks one at a time to minimize memory usage
-        for (int i = 0; i < chunks.size(); i += BATCH_SIZE) {
-            int endIdx = Math.min(i + BATCH_SIZE, chunks.size());
-
-            List<Document> documents = new ArrayList<>();
-            for (int j = i; j < endIdx; j++) {
-                Map<String, Object> metadata = new HashMap<>();
-                metadata.put("source", source);
-                metadata.put("chunk", j);
-                metadata.put("total_chunks", chunks.size());
-                metadata.put("timestamp", System.currentTimeMillis());
-
-                documents.add(new Document(chunks.get(j), metadata));
+            if (chunks.isEmpty()) {
+                log.warn("No chunks created from '{}'", source);
+                return 0;
             }
 
-            try {
-                vectorStore.add(documents);
-                totalStored += documents.size();
-                log.info("Stored batch {}-{} of {} chunks from '{}'", i, endIdx - 1, chunks.size(), source);
+            int totalStored = processBatches(chunks, source);
 
-                // Clear references to help GC
-                documents.clear();
-                documents = null;
+            documentCounter.addAndGet(totalStored);
+            documentStats.put(source, totalStored);
 
-                // Small delay to allow garbage collection
-                if (i + BATCH_SIZE < chunks.size()) {
-                    try {
-                        Thread.sleep(100);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                }
+            log.info("Successfully stored {} chunks from '{}'", totalStored, source);
+            System.gc();
 
-            } catch (OutOfMemoryError e) {
-                log.error("Out of memory storing batch {}-{}", i, endIdx - 1);
-                System.gc();
-                throw new RuntimeException("Out of memory while storing documents. Try smaller files or restart the server.");
-            } catch (Exception e) {
-                log.error("Error storing batch {}-{}", i, endIdx - 1, e);
-                throw new RuntimeException("Failed to store documents: " + e.getMessage());
-            }
+            return totalStored;
+
+        } finally {
+            processingLock.unlock();
         }
-
-        // Clear chunks list
-        chunks.clear();
-
-        documentCounter.addAndGet(totalStored);
-        documentStats.put(source, totalStored);
-
-        log.info("Successfully stored {} chunks from '{}'", totalStored, source);
-
-        // Force garbage collection after processing
-        System.gc();
-
-        return totalStored;
     }
 
     /**
-     * Process FAQs list
+     * Process FAQs with batch processing
      */
     public int processFaqs(List<String> faqs) {
-        log.info("Processing {} FAQs", faqs.size());
-
-        if (faqs.isEmpty()) {
+        if (faqs == null || faqs.isEmpty()) {
+            log.warn("Empty FAQ list provided");
             return 0;
         }
 
-        int totalStored = 0;
+        log.info("Processing {} FAQs", faqs.size());
 
-        // Process FAQs in small batches
-        for (int i = 0; i < faqs.size(); i += BATCH_SIZE) {
-            int endIdx = Math.min(i + BATCH_SIZE, faqs.size());
+        processingLock.lock();
+        try {
+            int totalStored = 0;
+            List<String> docIds = new ArrayList<>();
 
-            List<Document> documents = new ArrayList<>();
-            for (int j = i; j < endIdx; j++) {
-                String faq = faqs.get(j).trim();
-                if (faq.isEmpty()) {
-                    continue;
+            for (int i = 0; i < faqs.size(); i += BATCH_SIZE) {
+                int endIdx = Math.min(i + BATCH_SIZE, faqs.size());
+
+                List<Document> documents = new ArrayList<>();
+                for (int j = i; j < endIdx; j++) {
+                    String faq = faqs.get(j).trim();
+                    if (faq.isEmpty()) continue;
+
+                    String docId = generateDocumentId("faq", j);
+                    Map<String, Object> metadata = createMetadata("faq", j, faqs.size());
+
+                    Document doc = new Document(docId, faq, metadata);
+                    documents.add(doc);
+                    docIds.add(docId);
                 }
 
-                Map<String, Object> metadata = new HashMap<>();
-                metadata.put("source", "faq");
-                metadata.put("index", j);
-                metadata.put("timestamp", System.currentTimeMillis());
+                if (!documents.isEmpty()) {
+                    vectorStore.add(documents);
+                    totalStored += documents.size();
+                    log.debug("Stored FAQ batch {}-{}", i, endIdx - 1);
 
-                documents.add(new Document(faq, metadata));
+                    documents.clear();
+                    delayForGC();
+                }
             }
 
-            if (!documents.isEmpty()) {
-                vectorStore.add(documents);
-                totalStored += documents.size();
-            }
+            documentCounter.addAndGet(totalStored);
+            documentStats.put("faqs", totalStored);
+            documentIdsBySource.put("faqs", docIds);
 
-            documents.clear();
+            log.info("Stored {} FAQs", totalStored);
+            System.gc();
+
+            return totalStored;
+
+        } finally {
+            processingLock.unlock();
         }
-
-        documentCounter.addAndGet(totalStored);
-        documentStats.put("faqs", totalStored);
-
-        log.info("Stored {} FAQs", totalStored);
-        System.gc();
-
-        return totalStored;
     }
 
     /**
-     * Get statistics about stored documents
+     * Delete documents by source name
+     */
+    public boolean deleteDocumentsBySource(String source) {
+        processingLock.lock();
+        try {
+            List<String> docIds = documentIdsBySource.get(source);
+            if (docIds == null || docIds.isEmpty()) {
+                log.warn("No documents found for source: {}", source);
+                return false;
+            }
+
+            log.info("Deleting {} documents from source: {}", docIds.size(), source);
+
+            // Delete from vector store
+            vectorStore.delete(docIds);
+
+            // Update statistics
+            Integer count = documentStats.remove(source);
+            if (count != null) {
+                documentCounter.addAndGet(-count);
+            }
+            documentIdsBySource.remove(source);
+
+            log.info("Deleted {} documents from source: {}", docIds.size(), source);
+            System.gc();
+
+            return true;
+
+        } catch (Exception e) {
+            log.error("Error deleting documents from source: {}", source, e);
+            return false;
+        } finally {
+            processingLock.unlock();
+        }
+    }
+
+    /**
+     * Clear ALL documents from vector store
+     */
+    public void clearAllDocuments() {
+        processingLock.lock();
+        try {
+            log.info("Clearing all documents from vector store");
+
+            // Delete all documents from vector store
+            List<String> allDocIds = new ArrayList<>();
+            documentIdsBySource.values().forEach(allDocIds::addAll);
+
+            if (!allDocIds.isEmpty()) {
+                log.info("Deleting {} documents from vector store", allDocIds.size());
+                vectorStore.delete(allDocIds);
+            }
+
+            // Clear all statistics
+            documentCounter.set(0);
+            documentStats.clear();
+            documentIdsBySource.clear();
+
+            log.info("All documents cleared successfully");
+            System.gc();
+
+        } catch (Exception e) {
+            log.error("Error clearing documents", e);
+            throw new RuntimeException("Failed to clear documents: " + e.getMessage());
+        } finally {
+            processingLock.unlock();
+        }
+    }
+
+    /**
+     * Get comprehensive statistics
      */
     public Map<String, Object> getStatistics() {
         Runtime runtime = Runtime.getRuntime();
@@ -214,23 +246,123 @@ public class DocumentService {
         stats.put("memoryUsedMB", usedMemory);
         stats.put("memoryMaxMB", maxMemory);
         stats.put("memoryUsagePercent", (usedMemory * 100) / maxMemory);
+        stats.put("sources", new ArrayList<>(documentStats.keySet()));
 
         return stats;
     }
 
     /**
-     * Clear all documents
+     * List all document sources
      */
-    public void clearAllDocuments() {
-        documentCounter.set(0);
-        documentStats.clear();
-        log.info("Cleared all document statistics");
-        System.gc();
+    public List<String> listSources() {
+        return new ArrayList<>(documentStats.keySet());
     }
 
-    /**
-     * OPTIMIZED: Split text into chunks with overlap
-     */
+    // ==================== Private Helper Methods ====================
+
+    private void validateFile(MultipartFile file, String filename, long fileSize) throws IOException {
+        if (file.isEmpty()) {
+            throw new IOException("File is empty");
+        }
+
+        if (fileSize > MAX_FILE_SIZE) {
+            throw new IOException(String.format(
+                    "File too large (%d bytes). Maximum size is %d MB",
+                    fileSize, MAX_FILE_SIZE / (1024 * 1024)
+            ));
+        }
+
+        if (filename == null || filename.trim().isEmpty()) {
+            throw new IOException("Invalid filename");
+        }
+    }
+
+    private void validateContentSize(String content) {
+        if (content.length() > MAX_TEXT_LENGTH) {
+            throw new IllegalArgumentException(String.format(
+                    "Content too large (%d chars). Maximum length is %d MB",
+                    content.length(), MAX_TEXT_LENGTH / (1024 * 1024)
+            ));
+        }
+    }
+
+    private String extractContent(MultipartFile file, String filename) throws IOException {
+        if (filename.toLowerCase().endsWith(".pdf")) {
+            return extractTextFromPdf(file.getInputStream());
+        } else {
+            return new String(file.getBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    private int processBatches(List<String> chunks, String source) {
+        int totalStored = 0;
+        List<String> docIds = new ArrayList<>();
+
+        for (int i = 0; i < chunks.size(); i += BATCH_SIZE) {
+            int endIdx = Math.min(i + BATCH_SIZE, chunks.size());
+
+            List<Document> documents = new ArrayList<>();
+            for (int j = i; j < endIdx; j++) {
+                String docId = generateDocumentId(source, j);
+                Map<String, Object> metadata = createMetadata(source, j, chunks.size());
+
+                Document doc = new Document(docId, chunks.get(j), metadata);
+                documents.add(doc);
+                docIds.add(docId);
+            }
+
+            try {
+                vectorStore.add(documents);
+                totalStored += documents.size();
+                log.debug("Stored batch {}-{} of {} chunks from '{}'",
+                        i, endIdx - 1, chunks.size(), source);
+
+                documents.clear();
+                delayForGC();
+
+            } catch (OutOfMemoryError e) {
+                log.error("Out of memory storing batch {}-{}", i, endIdx - 1);
+                System.gc();
+                throw new RuntimeException(
+                        "Out of memory while storing documents. Try smaller files or restart the server."
+                );
+            } catch (Exception e) {
+                log.error("Error storing batch {}-{}", i, endIdx - 1, e);
+                throw new RuntimeException("Failed to store documents: " + e.getMessage());
+            }
+        }
+
+        documentIdsBySource.put(source, docIds);
+        return totalStored;
+    }
+
+    private String generateDocumentId(String source, int index) {
+        return String.format("%s_%d_%d",
+                source.replaceAll("[^a-zA-Z0-9]", "_"),
+                index,
+                System.currentTimeMillis()
+        );
+    }
+
+    private Map<String, Object> createMetadata(String source, int index, int total) {
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("source", source);
+        metadata.put("chunk", index);
+        metadata.put("total_chunks", total);
+        metadata.put("timestamp", System.currentTimeMillis());
+        return metadata;
+    }
+
+    private void delayForGC() {
+        if (BATCH_DELAY_MS > 0) {
+            try {
+                Thread.sleep(BATCH_DELAY_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
     private List<String> chunkText(String text) {
         List<String> chunks = new ArrayList<>();
 
@@ -240,23 +372,20 @@ public class DocumentService {
 
         int textLength = text.length();
         int position = 0;
-        int maxChunks = (textLength / CHUNK_SIZE) + 100; // Safety limit
+        int maxChunks = (textLength / CHUNK_SIZE) + 100;
         int chunkCount = 0;
 
         while (position < textLength && chunkCount < maxChunks) {
             int endPosition = Math.min(position + CHUNK_SIZE, textLength);
 
             if (endPosition < textLength) {
-                // Find sentence boundary
                 int lastPeriod = findLastBoundary(text, position, endPosition, '.', '!', '?');
                 int lastNewline = findLastBoundary(text, position, endPosition, '\n');
-
                 int breakPoint = Math.max(lastPeriod, lastNewline);
 
                 if (breakPoint > position + (CHUNK_SIZE / 2)) {
                     endPosition = breakPoint + 1;
                 } else {
-                    // Try word boundary
                     int lastSpace = findLastBoundary(text, position, endPosition, ' ');
                     if (lastSpace > position + (CHUNK_SIZE / 2)) {
                         endPosition = lastSpace;
@@ -271,10 +400,7 @@ public class DocumentService {
                 chunkCount++;
             }
 
-            // Move forward with overlap
             int nextPosition = endPosition - CHUNK_OVERLAP;
-
-            // Ensure progress
             if (nextPosition <= position) {
                 nextPosition = endPosition;
             }
@@ -285,9 +411,6 @@ public class DocumentService {
         return chunks;
     }
 
-    /**
-     * Find the last occurrence of boundary characters
-     */
     private int findLastBoundary(String text, int start, int end, char... chars) {
         for (int i = end - 1; i >= start; i--) {
             char c = text.charAt(i);
@@ -300,9 +423,6 @@ public class DocumentService {
         return -1;
     }
 
-    /**
-     * Extract text from PDF with memory optimization
-     */
     private String extractTextFromPdf(InputStream inputStream) throws IOException {
         PDDocument document = null;
         try {
@@ -311,30 +431,31 @@ public class DocumentService {
             int pageCount = document.getNumberOfPages();
             log.info("PDF has {} pages", pageCount);
 
-            if (pageCount > 200) {
-                throw new IOException("PDF too large. Maximum 200 pages allowed.");
+            if (pageCount > MAX_PDF_PAGES) {
+                throw new IOException(String.format(
+                        "PDF too large (%d pages). Maximum %d pages allowed.",
+                        pageCount, MAX_PDF_PAGES
+                ));
             }
 
             PDFTextStripper stripper = new PDFTextStripper();
-
-            // Extract text page by page to reduce memory usage
             StringBuilder fullText = new StringBuilder();
+
             for (int i = 1; i <= pageCount; i++) {
                 stripper.setStartPage(i);
                 stripper.setEndPage(i);
                 String pageText = stripper.getText(document);
                 fullText.append(pageText);
 
-                // Check size periodically
                 if (fullText.length() > MAX_TEXT_LENGTH) {
-                    throw new IOException("PDF content too large. Maximum " + (MAX_TEXT_LENGTH / 1024 / 1024) + "MB of text allowed.");
+                    throw new IOException(String.format(
+                            "PDF content too large. Maximum %d MB of text allowed.",
+                            MAX_TEXT_LENGTH / (1024 * 1024)
+                    ));
                 }
             }
 
-            String text = fullText.toString();
-            fullText = null; // Help GC
-
-            return text;
+            return fullText.toString();
 
         } catch (OutOfMemoryError e) {
             log.error("Out of memory while processing PDF");
