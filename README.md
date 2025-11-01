@@ -683,12 +683,12 @@ CREATE INDEX ON documents(tenant_id);
 
 ### Migration Roadmap
 
-| Phase | Time | Effort | Impact |
-|-------|------|--------|--------|
-| Phase 1 (Postgres + pgvector) | 1-2 weeks | Medium | High - Removes memory limits |
-| Phase 2 (Async + Queue) | 2-3 weeks | Medium | High - Better UX |
-| Phase 3 (S3 + Workers) | 3-4 weeks | High | High - True scalability |
-| Phase 4 (Advanced) | Ongoing | High | Medium - Nice-to-haves |
+| Phase |Effort | Impact |
+|-------|-------|--------|
+| Phase 1 (Postgres + pgvector) | Medium | High - Removes memory limits |
+| Phase 2 (Async + Queue) | Medium | High - Better UX |
+| Phase 3 (S3 + Workers) | High | High - True scalability |
+| Phase 4 (Advanced) | High | Medium - Nice-to-haves |
 
 ## 🐛 Troubleshooting
 
